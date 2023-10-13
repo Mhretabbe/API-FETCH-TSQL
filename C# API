@@ -1,0 +1,78 @@
+using RestSharp;
+using System;
+using System.Data;
+using System.Data.SqlClient;
+
+namespace UpKeep_API_MotorHours
+{
+    class Program
+    {
+
+        static void Main(string[] args)
+        {
+            SqlConnection con = new SqlConnection(@"Data Source=SWDDWH01;Initial Catalog=UpKeepAPI;Integrated Security=True");
+            SqlCommand cmd;
+            con.Open();
+            cmd = new SqlCommand("EXEC API", con);
+            cmd.ExecuteNonQuery();
+            cmd = new SqlCommand("  SELECT Num,id,name,CAST(value AS INT) FROM vwMotorHoursWithMeters ORDER BY Num", con);
+            DataTable dt = new DataTable();
+            SqlDataAdapter da = new SqlDataAdapter(cmd);
+            da.Fill(dt);
+            if (dt.Rows.Count > 0)
+            {
+                for (int i = 0; i < dt.Rows.Count; i++)
+                {
+                 PostValue(dt.Rows[i][1].ToString(), Convert.ToInt32(dt.Rows[i][3].ToString()));
+                }
+            }
+
+
+
+            //GetRequest("http://www.google.com.pk");
+            //GetRequest("https://api.onupkeep.com/api/v2/meters/");
+
+            //PostRequest("https://api.onupkeep.com/api/v2/auth/");
+
+
+
+            //Console.ReadKey();
+        }
+        public static void PostValue(string id, int values)
+        {
+            SqlConnection con = new SqlConnection(@"Data Source=SWDDWH01;Initial Catalog=UpKeepAPI;Integrated Security=True");
+            con.Open();
+            SqlCommand cmd = new SqlCommand("SELECT SessionToken FROM [dbo].[UpKeepToken]", con);
+            DataTable dt = new DataTable();
+            SqlDataAdapter da = new SqlDataAdapter(cmd);
+            da.Fill(dt);
+            if (dt.Rows.Count < 1)
+            {
+                return;
+            }
+
+
+            var client = new RestClient("https://api.onupkeep.com/api/v2/meters/" + id + "/readings");
+            var request = new RestRequest("?", Method.Post);
+            //request.AddParameter("value", "1");
+            int Importedvalue = values;
+            var json = "{ \"value\":"+Importedvalue+" }";
+        string sending = json;
+            request.AddJsonBody(sending);
+
+            var ab = dt.Rows[0][0].ToString();
+            //request.AddParameter("salary", "120000");
+            //request.AddParameter("age", "20");
+
+            request.AddHeader("Content-Type", "application/json; charset=utf-8");
+            request.AddHeader("Session-Token", dt.Rows[0][0].ToString());
+            var response = client.Execute(request);
+            if (response.StatusCode == System.Net.HttpStatusCode.OK)
+            {
+                Console.WriteLine(response.IsSuccessful);
+            }
+
+
+        }
+    }
+}
