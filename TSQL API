@@ -1,0 +1,256 @@
+USE [UpKeepAPI]
+GO
+/****** Object:  StoredProcedure [dbo].[API]    Script Date: 2023-10-12 11:28:47 AM ******/
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER PROCEDURE [dbo].[API]	
+					
+AS
+BEGIN
+
+
+	SET NOCOUNT ON;
+    DECLARE @vWin int --token of WinHttp object
+    DECLARE @vReturnCode int 
+    DECLARE @tResponse TABLE (ResponseText nvarchar(max))
+	 DECLARE @tResponseMeters TABLE (ResponseText nvarchar(max))
+
+	
+--if((SELECT ExpirsAt FROM dbo.UpkeepToken)< DATEADD(DAY,70,GETDATE() ) OR (SELECT COUNT(ExpirsAt) FROM dbo.UpkeepToken)<1)	-- <- check if the session token is expired or not
+--	BEGIN    --- Get Session-Token if it is expiring
+	--truncate table [dbo].[UpKeepToken] ignoring this, user will input token Manualy
+	DECLARE @Url varchar(8000)='https://api.onupkeep.com/api/v2/auth/', 
+						@Method varchar(5) = 'POST',
+						@BodyData nvarchar(max) =null,-- '{"email":"","password":""}',-- login name and password
+						
+						@ContentType varchar(255) = 'application/JSON'--'application/xml'
+						
+						-- Michael Session   r:7ece719bf69b8f6aa4bbc35a60ca1e97
+
+						--INSERT INTO UpKeepToken(ExpirsAt,SessionToken) VALUES('2024-10-11T20:37:42.535Z','r:896f0475b683e8ec83d2676bfd018f53')
+
+
+	--Creates an instance of WinHttp.WinHttpRequest
+
+
+	EXEC @vReturnCode = sp_OACreate 'WinHttp.WinHttpRequest.5.1',@vWin OUT 
+	
+    IF @vReturnCode <> 0 GOTO EXCEPTION
+
+
+    EXEC @vReturnCode = sp_OAMethod @vWin, 'Open', NULL, @Method/*Method*/, @Url /*Url*/, 'false' /*IsAsync*/
+    IF @vReturnCode <> 0 GOTO EXCEPTION
+
+
+	-- create Header
+
+		EXEC @vReturnCode = sp_OAMethod @vWin, 'SetRequestHeader', NULL, 'Content-Type', @ContentType
+		IF @vReturnCode <> 0 GOTO EXCEPTION
+	
+
+	
+
+    IF @BodyData IS NOT NULL
+	BEGIN
+	
+		EXEC @vReturnCode = sp_OAMethod @vWin,'Send', NULL, @BodyData 
+		IF @vReturnCode <> 0 GOTO EXCEPTION
+	
+	END
+	
+
+    IF @vReturnCode <> 0 GOTO EXCEPTION
+
+	--Get Response text
+	
+	INSERT INTO @tResponse (ResponseText) 
+	EXEC @vReturnCode = sp_OAGetProperty @vWin,'ResponseText'
+
+    IF @vReturnCode <> 0 GOTO EXCEPTION
+
+	IF @vReturnCode = 0 
+		GOTO RESULT
+
+	EXCEPTION:
+	
+		BEGIN
+					DECLARE @tException TABLE
+					(
+						Error binary(4),
+						Source varchar(8000),
+						Description varchar(8000),
+						HelpFile varchar(8000),
+						HelpID varchar(8000)
+					)
+
+					INSERT INTO @tException EXEC sp_OAGetErrorInfo @vWin
+					INSERT
+					INTO	@tResponse
+					(
+							ResponseText
+					)
+					SELECT	( 
+								SELECT	*
+								FROM	@tException
+								FOR		JSON AUTO
+							) AS ResponseText
+		END
+		-- exception ends
+	--FINALLY
+	RESULT:
+
+	--Dispose objects 
+	IF @vWin IS NOT NULL
+		EXEC sp_OADestroy @vWin
+
+
+	--Result  -- Get the SessionToken and save it to Table UpkeepToken
+						/*		  INSERT INTO  dbo.UpkeepToken (SessionToken,ExpirsAt)
+									SELECT [SessionToken],[expiresAt] FROM OPENJSON((SELECT * FROM @tResponse))
+
+									WITH
+								(
+								[result] nVARCHAR(MAX) AS JSON
+								) AS MetaData
+
+								CROSS APPLY OPENJSON ([MetaData].[result])
+								WITH (
+								[sessionToken] nVARCHAR(Max),
+								[expiresAt] nVARCHAR(Max)
+								) AS SessionResult
+								*/   -- token session not needed, user will input token session manualy
+--END    --- Get Session-Token if it is expiring ends
+
+
+DECLARE @Token nVARCHAR(MAX)=(SELECT TOP 1 [SessionToken] FROM dbo.UpkeepToken)
+
+	DECLARE @UrlMeter varchar(8000)='https://api.onupkeep.com/api/v2/meters/',  -- Get all the meters
+							@Method2 varchar(5) = 'GET',
+							@BodyData2 nvarchar(max) = NULL,--normally json object string : '{"key":"value"}',
+						
+							@ContentType2 varchar(255) = 'application/JSON'--'application/xml'
+							-- @Token2 nVARCHAR(MAX)=(SELECT TOP 1 SessionToken FROM SWDSQL04.SwissWater.dbo.UpkeepToken) we don't need this now
+
+					
+		EXEC @vReturnCode = sp_OACreate 'WinHttp.WinHttpRequest.5.1',@vWin OUT 
+
+		IF @vReturnCode <> 0 GOTO EXCEPTION
+
+
+		EXEC @vReturnCode = sp_OAMethod @vWin, 'Open', NULL, @Method2/*Method*/, @UrlMeter /*Url*/, 'false' /*IsAsync*/
+		IF @vReturnCode <> 0 GOTO EXCEPTION -- 0 means no error
+
+	
+		-- create Header
+
+			EXEC @vReturnCode = sp_OAMethod @vWin, 'SetRequestHeader', NULL,'Session-Token',@Token, 'Content-Type', @ContentType2
+			IF @vReturnCode <> 0 GOTO EXCEPTION
+	
+
+	
+		
+			EXEC @vReturnCode = sp_OAMethod @vWin,'Send', NULL, @BodyData2 
+			IF @vReturnCode <> 0 GOTO EXCEPTION
+	
+		
+	
+
+		IF @vReturnCode <> 0 GOTO EXCEPTION2
+
+----------------------------------------------------------------------------------------------------------------------
+	
+		INSERT INTO @tResponseMeters (ResponseText) 
+		EXEC @vReturnCode = sp_OAGetProperty @vWin,'ResponseText'
+		
+		IF @vReturnCode <> 0 GOTO EXCEPTION2
+		
+
+
+		IF @vReturnCode = 0 
+			GOTO METER_RESULT
+		
+		EXCEPTION2:
+	
+			BEGIN
+				DECLARE @tException2 TABLE
+				(
+					Error binary(4),
+					Source varchar(8000),
+					Description varchar(8000),
+					HelpFile varchar(8000),
+					HelpID varchar(8000)
+				)
+
+				INSERT INTO @tException EXEC sp_OAGetErrorInfo @vWin
+				INSERT
+				INTO	@tResponseMeters 
+				(
+						ResponseText
+				)
+				SELECT	( 
+							SELECT	*
+							FROM	@tException
+							FOR		JSON AUTO
+						) AS ResponseText
+			END
+
+		--FINALLY
+		METER_RESULT:
+	
+
+
+		--Dispose objects 
+		IF @vWin IS NOT NULL
+			EXEC sp_OADestroy @vWin
+		
+			TRUNCATE TABLE dbo.MeterIDs
+		
+	
+
+	
+	INSERT INTO dbo.MeterIDs(id,name,asset)
+		--Result  -- Get the SessionToken and save it to Table UpkeepToken
+	
+	SELECT [id],[name],[asset] FROM OPENJSON((SELECT TOP 1 * FROM @tResponseMeters))
+	
+	WITH
+	(
+	results nVARCHAR(MAX) AS JSON
+	
+	) AS Meter
+	
+	CROSS APPLY OPENJSON(Meter.results)
+	with
+	(
+	id nvarchar(200),
+	name nVARCHAR(200),
+	asset nvarchar(200)
+	)
+	
+	RETURN  --API
+
+
+
+
+
+	--CREATE TABLE MeterIDs
+	--(Num int identity(1,1),
+	--id nVARCHAR(20),
+	--MotorName nVARCHAR(20),
+	--name nVARCHAR(50),
+	--asset nVARCHAR(20),
+	--Hours INT
+	--)
+	
+	-- SELECT * FROM dbo.MeterIDs WHERE name='M-H1251-1 HRS'
+	
+END
+
+
+
+
+--SELECT * FROM SWDSQL04.SwissWater.dbo.UpkeepToken
+
+--r:4251feebbcd74dd1898c00a4fd5fc622
